@@ -2,8 +2,8 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import { PencilIcon, TrashIcon, PlusIcon } from "@heroicons/react/24/solid";
-import { Types } from "mongoose";
 import Link from "next/link";
+import { Types } from "mongoose";
 import { IBM_Plex_Serif, Nunito_Sans } from "next/font/google";
 import { CircularLoader } from "@/components/common/loader/Loaders";
 import { Alumni } from "@/models/Alumnus";
@@ -27,6 +27,7 @@ export default function AlumniPage() {
   const [page, setPage] = useState(1);
 
   const getData = async () => {
+    setLoading(true);
     const response = await fetch(
       `/api/v1/alumnus?limit=${PAGE_LIMIT}&page=${page}`
     );
@@ -42,24 +43,25 @@ export default function AlumniPage() {
   };
 
   const handleScroll = () => {
-    setPage(page + 1);
+    if (
+      window.innerHeight + window.scrollY >= document.body.offsetHeight &&
+      loadmore
+    ) {
+      setPage((prevPage) => prevPage + 1);
+    }
   };
 
   useEffect(() => {
     getData();
-    window.addEventListener("scroll", () => {
-      if (
-        loadmore &&
-        window.innerHeight + window.scrollY >= document.body.offsetHeight
-      ) {
-        handleScroll();
-      }
-    });
+  }, [page]);
+
+  useEffect(() => {
+    window.addEventListener("scroll", handleScroll);
 
     return () => {
       window.removeEventListener("scroll", handleScroll);
     };
-  }, [page]);
+  }, [loadmore]);
 
   const handleDeleteAlumni = async (_id: string) => {
     const response = await fetch(`/api/v1/alumnus/${_id}`, {
