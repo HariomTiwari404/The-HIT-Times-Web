@@ -5,6 +5,7 @@ import { MatchPosts } from "@/models/Match";
 import { codeToTeamName } from "@/lib/codeToTeamName";
 import Link from "next/link";
 import { CircularLoader } from "@/components/common/loader/Loaders";
+import { ArrowPathIcon } from "@heroicons/react/24/outline";
 
 const formatDateTime = (d: Date | string) => {
   const date = new Date(d);
@@ -29,24 +30,34 @@ const MatchDetailPage = ({
   const [match, setMatch] = useState<MatchPosts | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const fetchMatch = async (silent = false) => {
+    if (!silent) setIsRefreshing(true);
+    try {
+      const res = await fetch(`/api/v1/live/match/${params.matchId}`);
+      const data = await res.json();
+      if (res.ok && data?.data) {
+        setMatch(data.data);
+        setError(null);
+      } else {
+        setError(data?.msg || "Failed to load match");
+      }
+    } catch (err) {
+      setError("Failed to load match");
+    } finally {
+      if (!silent) setIsRefreshing(false);
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        const res = await fetch(`/api/v1/live/match/${params.matchId}`);
-        const data = await res.json();
-        if (res.ok && data?.data) {
-          setMatch(data.data);
-        } else {
-          setError(data?.msg || "Failed to load match");
-        }
-      } catch (err) {
-        setError("Failed to load match");
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
+    fetchMatch();
+    const interval = setInterval(() => {
+      fetchMatch(true); // silent refresh every 20 seconds
+    }, 20000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.matchId]);
 
   if (loading) {
@@ -70,12 +81,12 @@ const MatchDetailPage = ({
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8 flex flex-col gap-8">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-sm uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
             {match.match_type}
           </p>
-          <h1 className="text-3xl font-semibold text-gray-900 dark:text-gray-100">
+          <h1 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-gray-100 leading-tight">
             {getTeamLabel(match.team1.team_code, match.team1.team_name)} vs{" "}
             {getTeamLabel(match.team2.team_code, match.team2.team_name)}
           </h1>
@@ -83,12 +94,24 @@ const MatchDetailPage = ({
             {formatDateTime(match.match_date)}
           </p>
         </div>
-        <Link
-          href="/matches"
-          className="rounded-full bg-gray-100 dark:bg-gray-800 px-4 py-2 text-sm font-semibold text-gray-800 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-gray-700"
-        >
-          Back to matches
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => fetchMatch()}
+            className="inline-flex items-center gap-1 rounded-full bg-gray-100 dark:bg-gray-800 px-3 py-2 text-xs font-semibold text-gray-800 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-gray-700"
+            disabled={isRefreshing}
+          >
+            <ArrowPathIcon
+              className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`}
+            />
+            Refresh
+          </button>
+          <Link
+            href="/matches"
+            className="rounded-full bg-gray-100 dark:bg-gray-800 px-3 py-2 text-xs font-semibold text-gray-800 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-gray-700"
+          >
+            Back to matches
+          </Link>
+        </div>
       </div>
 
       <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
