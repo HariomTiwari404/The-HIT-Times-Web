@@ -6,6 +6,16 @@ import { codeToTeamName } from "@/lib/codeToTeamName";
 import Link from "next/link";
 import { CircularLoader } from "@/components/common/loader/Loaders";
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
+import { Teams } from "@/models/Team";
+
+const toRenderableImage = (url?: string) => {
+  if (!url) return undefined;
+  const driveIdMatch = url.match(/\/d\/([^/]+)/) || url.match(/[?&]id=([^&]+)/);
+  if (driveIdMatch && driveIdMatch[1]) {
+    return `https://drive.google.com/uc?export=view&id=${driveIdMatch[1]}`;
+  }
+  return url;
+};
 
 const formatDateTime = (d: Date | string) => {
   const date = new Date(d);
@@ -22,6 +32,105 @@ const formatDateTime = (d: Date | string) => {
 const getTeamLabel = (code: string, name?: string) =>
   codeToTeamName[code] || name || code;
 
+const TeamCard = ({
+  team,
+  sport,
+}: {
+  team?: Teams;
+  sport: "football" | "cricket";
+}) => {
+  if (!team) return null;
+  const detail = team[sport];
+  if (!detail) return null;
+  const players = detail.players || [];
+
+  const captain = players.find((p) =>
+    /captain/i.test(p.player_description || "")
+  );
+  const viceCaptain = players.find(
+    (p) =>
+      /vice\s*captain/i.test(p.player_description || "") ||
+      /vc\b/i.test(p.player_description || "")
+  );
+
+  return (
+    <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 bg-gray-50 dark:bg-gray-900/60 h-full">
+      <div className="flex items-center gap-3 mb-3">
+        {detail.team_logo && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={toRenderableImage(detail.team_logo)}
+            alt={detail.team_name}
+            className="h-10 w-10 rounded-full object-cover flex-shrink-0"
+            referrerPolicy="no-referrer"
+            onError={(e) => {
+              e.currentTarget.style.display = "none";
+            }}
+          />
+        )}
+        <div>
+          <p className="text-xs uppercase text-gray-500 dark:text-gray-400">
+            {sport}
+          </p>
+          <p className="text-base font-semibold text-gray-900 dark:text-gray-100">
+            {detail.team_name}
+          </p>
+        </div>
+      </div>
+      <div className="grid gap-2 text-sm text-gray-800 dark:text-gray-200">
+        {captain && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-700">
+              Captain
+            </span>
+            <span>{captain.player_name}</span>
+          </div>
+        )}
+        {viceCaptain && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs px-2 py-1 rounded-full bg-indigo-100 text-indigo-700">
+              Vice Captain
+            </span>
+            <span>{viceCaptain.player_name}</span>
+          </div>
+        )}
+        {players
+          .filter(
+            (p) =>
+              p !== captain &&
+              p !== viceCaptain &&
+              (p.player_name || p.player_description)
+          )
+          .slice(0, 4)
+          .map((p) => (
+            <div key={p.player_name} className="flex items-center gap-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              {p.player_image && (
+                <img
+                  src={toRenderableImage(p.player_image)}
+                  alt={p.player_name}
+              className="h-8 w-8 rounded-full object-cover flex-shrink-0"
+              referrerPolicy="no-referrer"
+              onError={(e) => {
+                e.currentTarget.style.display = "none";
+              }}
+            />
+          )}
+          <div className="flex flex-col min-w-0">
+            <span className="font-medium truncate">{p.player_name}</span>
+            {p.player_description && (
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                {p.player_description}
+              </span>
+            )}
+              </div>
+            </div>
+          ))}
+      </div>
+    </div>
+  );
+};
+
 const MatchDetailPage = ({
   params,
 }: {
@@ -31,8 +140,43 @@ const MatchDetailPage = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [teams, setTeams] = useState<Record<string, Teams>>({});
 
-  const fetchMatch = async (silent = false) => {
+  const fetchTeams = async (teamCodes: string[]) => {
+    const uniqueCodes = Array.from(new Set(teamCodes.filter(Boolean)));
+    if (uniqueCodes.length === 0) return;
+    const teamResponses = await Promise.all(
+      uniqueCodes.map(async (code) => {
+        try {
+          const tRes = await fetch(`/api/v1/team/${code}`);
+          const tData = await tRes.json();
+          if (tRes.ok && tData?.data) {
+            return [code, tData.data as Teams] as const;
+          }
+        } catch (err) {
+          return null;
+        }
+        return null;
+      })
+    );
+    const nextTeams: Record<string, Teams> = {};
+    teamResponses.forEach((entry) => {
+      if (entry) {
+        nextTeams[entry[0]] = entry[1];
+      }
+    });
+    if (Object.keys(nextTeams).length > 0) {
+      setTeams((prev) => ({ ...prev, ...nextTeams }));
+    }
+  };
+
+  const fetchMatch = async ({
+    silent = false,
+    includeTeams = false,
+  }: {
+    silent?: boolean;
+    includeTeams?: boolean;
+  } = {}) => {
     if (!silent) setIsRefreshing(true);
     try {
       const res = await fetch(`/api/v1/live/match/${params.matchId}`);
@@ -40,6 +184,13 @@ const MatchDetailPage = ({
       if (res.ok && data?.data) {
         setMatch(data.data);
         setError(null);
+        if (includeTeams) {
+          const teamCodes = [
+            data.data.team1?.team_code,
+            data.data.team2?.team_code,
+          ].filter(Boolean) as string[];
+          fetchTeams(teamCodes);
+        }
       } else {
         setError(data?.msg || "Failed to load match");
       }
@@ -52,9 +203,9 @@ const MatchDetailPage = ({
   };
 
   useEffect(() => {
-    fetchMatch();
+    fetchMatch({ includeTeams: true });
     const interval = setInterval(() => {
-      fetchMatch(true); // silent refresh every 20 seconds
+      fetchMatch({ silent: true }); // silent refresh every 20 seconds
     }, 20000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -96,7 +247,7 @@ const MatchDetailPage = ({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={() => fetchMatch()}
+            onClick={() => fetchMatch({ includeTeams: true })}
             className="inline-flex items-center gap-1 rounded-full bg-gray-100 dark:bg-gray-800 px-3 py-2 text-xs font-semibold text-gray-800 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-gray-700"
             disabled={isRefreshing}
           >
@@ -151,6 +302,17 @@ const MatchDetailPage = ({
             )}
           </div>
         </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 md:gap-4">
+        <TeamCard
+          team={teams[match.team1.team_code]}
+          sport={match.match_type === "cricket" ? "cricket" : "football"}
+        />
+        <TeamCard
+          team={teams[match.team2.team_code]}
+          sport={match.match_type === "cricket" ? "cricket" : "football"}
+        />
       </div>
 
       {match.timeline && match.timeline.length > 0 && (
